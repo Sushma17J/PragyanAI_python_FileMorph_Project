@@ -293,8 +293,9 @@ with main:
             st.error(f"{name}: {error}")
 
     if st.session_state.results:
-        st.markdown("#### ⬇️ Download results")
+        st.markdown("#### 👀 Review converted files before downloading")
         for i, item in enumerate(st.session_state.results):
+            show_preview(item)
             ca, cb = st.columns([3, 1])
             with ca:
                 st.write(f"**{item['name']}**")
