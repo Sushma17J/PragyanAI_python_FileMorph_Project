@@ -201,6 +201,87 @@ def convert(tool, uploaded, quality, dpi, img_fmt):
         return excel_to_pdf(data, name), f"{stem}_pdf_sheets.zip", "application/zip"
     raise ValueError("Unsupported conversion.")
 
+def show_preview(item):
+    """Render a safe, useful preview for the converted output before download."""
+    data = item.get("data", b"")
+    name = item.get("name", "converted_file")
+    suffix = Path(name).suffix.lower()
+
+    with st.expander(f"👁️ Preview: {name}", expanded=True):
+        try:
+            if suffix == ".pdf":
+                pdf = fitz.open(stream=data, filetype="pdf")
+                st.caption(f"PDF preview · {len(pdf)} page(s); showing up to the first 3 pages")
+                for page_index, page in enumerate(pdf[:3], start=1):
+                    pix = page.get_pixmap(matrix=fitz.Matrix(1.1, 1.1), alpha=False)
+                    st.image(pix.tobytes("png"), caption=f"Page {page_index}", use_container_width=True)
+                if len(pdf) > 3:
+                    st.info(f"Showing 3 of {len(pdf)} pages. Download the file to view the complete document.")
+                pdf.close()
+
+            elif suffix in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}:
+                st.image(data, caption=name, use_container_width=True)
+
+            elif suffix == ".csv":
+                df = pd.read_csv(io.BytesIO(data), nrows=100)
+                st.dataframe(df, use_container_width=True, hide_index=True)
+                st.caption("Preview shows up to the first 100 rows.")
+
+            elif suffix == ".docx":
+                doc = Document(io.BytesIO(data))
+                paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+                if paragraphs:
+                    st.text_area("Document text preview", "\n\n".join(paragraphs[:30]), height=260,
+                                 disabled=True, key=f"preview_docx_{abs(hash(name))}")
+                    if len(paragraphs) > 30:
+                        st.caption(f"Showing 30 of {len(paragraphs)} paragraphs.")
+                else:
+                    st.info("No paragraph text was found in this Word document.")
+
+            elif suffix == ".pptx":
+                prs = Presentation(io.BytesIO(data))
+                st.caption(f"PowerPoint preview · {len(prs.slides)} slide(s)")
+                for slide_no, slide in enumerate(prs.slides[:10], start=1):
+                    lines = []
+                    for shape in slide.shapes:
+                        if getattr(shape, "has_text_frame", False) and shape.text.strip():
+                            lines.append(shape.text.strip())
+                    with st.container(border=True):
+                        st.markdown(f"**Slide {slide_no}**")
+                        st.write("\n\n".join(lines) if lines else "No text on this slide (it may contain images).")
+                if len(prs.slides) > 10:
+                    st.info("Showing the first 10 slides in this text preview.")
+
+            elif suffix == ".zip":
+                with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                    names = [n for n in archive.namelist() if not n.endswith("/")]
+                    st.caption(f"ZIP preview · {len(names)} file(s) included")
+                    st.dataframe(pd.DataFrame({"Included file": names}), use_container_width=True, hide_index=True)
+                    # Preview one supported item inside the archive where practical.
+                    preview_name = next((n for n in names if Path(n).suffix.lower() == ".csv"), None)
+                    if preview_name:
+                        st.markdown(f"**Sample CSV: {preview_name}**")
+                        st.dataframe(pd.read_csv(io.BytesIO(archive.read(preview_name)), nrows=30),
+                                     use_container_width=True, hide_index=True)
+                    else:
+                        preview_pdf = next((n for n in names if Path(n).suffix.lower() == ".pdf"), None)
+                        if preview_pdf:
+                            pdf = fitz.open(stream=archive.read(preview_pdf), filetype="pdf")
+                            if len(pdf):
+                                pix = pdf[0].get_pixmap(matrix=fitz.Matrix(1, 1), alpha=False)
+                                st.image(pix.tobytes("png"), caption=f"First page of {preview_pdf}", use_container_width=True)
+                            pdf.close()
+                        else:
+                            preview_image = next((n for n in names if Path(n).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}), None)
+                            if preview_image:
+                                st.image(archive.read(preview_image), caption=preview_image, use_container_width=True)
+
+            else:
+                st.info("Preview is not available for this file type, but you can still download the converted file below.")
+        except Exception as exc:
+            st.warning(f"Preview could not be displayed: {exc}")
+
+
 if "results" not in st.session_state:
     st.session_state.results = []
 if "history" not in st.session_state:
